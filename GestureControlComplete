@@ -1,0 +1,96 @@
+import cv2
+import mediapipe as mp
+from pynput.keyboard import Key, Controller
+import time
+
+# Init
+keyboard = Controller()
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7)
+mp_draw = mp.solutions.drawing_utils
+cap = cv2.VideoCapture(0)
+
+# State
+last_action_time = 0
+cooldown = 1  # seconds
+
+def press_key(key):
+    keyboard.press(key)
+    time.sleep(0.15)
+    keyboard.release(key)
+
+while True:
+    success, frame = cap.read()
+    if not success:
+        break
+
+    frame = cv2.flip(frame, 1)
+    h, w, _ = frame.shape
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    result = pose.process(rgb_frame)
+
+    if result.pose_landmarks:
+        mp_draw.draw_landmarks(frame, result.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+
+        landmarks = result.pose_landmarks.landmark
+
+        # Key landmarks
+        left_hand = landmarks[mp_pose.PoseLandmark.LEFT_WRIST]
+        right_hand = landmarks[mp_pose.PoseLandmark.RIGHT_WRIST]
+        left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER]
+        right_shoulder = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+        left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP]
+        right_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP]
+        left_knee = landmarks[mp_pose.PoseLandmark.LEFT_KNEE]
+        right_knee = landmarks[mp_pose.PoseLandmark.RIGHT_KNEE]
+        left_foot = landmarks[mp_pose.PoseLandmark.LEFT_FOOT_INDEX]
+        right_foot = landmarks[mp_pose.PoseLandmark.RIGHT_FOOT_INDEX]
+        nose = landmarks[mp_pose.PoseLandmark.NOSE]
+
+        center_hip_y = (left_hip.y + right_hip.y) / 2
+        center_shoulder_y = (left_shoulder.y + right_shoulder.y) / 2
+        center_hand_y = (left_hand.y + right_hand.y) / 2
+        center_knee_y = (left_knee.y + right_knee.y) / 2
+        center_foot_y = (left_foot.y + right_foot.y) / 2
+
+        now = time.time()
+
+        # Punch Detection: hand near shoulder level
+        if abs(left_hand.y - left_shoulder.y) < 0.1 or abs(right_hand.y - right_shoulder.y) < 0.1:
+            if now - last_action_time > cooldown:
+                print("👊 Punch")
+                press_key('a')  # first punch
+                press_key('s')  # second punch
+                last_action_time = now
+
+        # Kick Detection: foot above knee
+        elif right_hip.y > left_knee.y or left_hip.y > right_knee.y:
+            if now - last_action_time > cooldown:
+                print("🦵 Kick")
+                press_key('z')  # first kick
+                press_key('x')  # second kick
+                last_action_time = now
+
+        # Jump Detection: both hands above head
+        elif left_hand.y < nose.y and right_hand.y < nose.y:
+            if now - last_action_time > cooldown:
+                print("⬆️ Jump")
+                press_key(Key.up)
+                last_action_time = now
+
+        # Crouch Detection: hip dropped lower than knee
+        elif nose.y > 0.5 :
+            if now - last_action_time > cooldown:
+                print("⬇️ Crouch")
+                press_key(Key.down)
+                last_action_time = now
+
+    # Show rig overlay
+    cv2.imshow("🕹️ Gesture Control - Tekken 6", frame)
+
+    if cv2.waitKey(1) & 0xFF == 27:  # ESC to quit
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+
